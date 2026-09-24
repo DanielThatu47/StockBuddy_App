@@ -80,15 +80,11 @@ public class TwoFactorController {
 							: "Verification code generated (configure SMTP to receive it by email)"));
 			emailbody.put("expiresIn", 300);
 			emailbody.put("sentByEmail", mailed);
-			if (!mailed) {
-				emailbody.put("otpPreview", otp);
-			}
 
 			return ResponseEntity.ok(emailbody);
 
 		} catch (Exception e) {
-			e.printStackTrace(); // 🔥 VERY IMPORTANT
-			return ResponseEntity.status(500).body(Map.of("success", false, "message", e.getMessage()));
+			return ResponseEntity.status(500).body(Map.of("success", false, "message", "Server error while generating verification code"));
 		}
 	}
 
