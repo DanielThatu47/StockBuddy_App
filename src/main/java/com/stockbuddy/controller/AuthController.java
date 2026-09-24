@@ -15,6 +15,7 @@ import com.stockbuddy.security.JwtUtil;
 import com.stockbuddy.service.CloudinaryService;
 import com.stockbuddy.service.EmailService;
 import com.stockbuddy.service.UserService;
+import jakarta.servlet.http.HttpSession;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -55,7 +56,7 @@ public class AuthController {
     // POST /api/register
     // ───────────────────────────────────────────────
     @PostMapping("/register")
-    public ResponseEntity<?> register(@RequestBody RegisterRequest req) {
+    public ResponseEntity<?> register(@RequestBody RegisterRequest req, HttpSession session) {
         try {
             String name     = req.getName() != null ? req.getName().trim() : null;
             String email    = req.getEmail() != null ? req.getEmail().trim().toLowerCase(Locale.ROOT) : null;
@@ -99,7 +100,9 @@ public class AuthController {
                         "message", "User already exists"));
             }
 
-            if (!req.isCaptchaVerified()) {
+            Object captchaVerified = session.getAttribute("captchaVerified");
+            session.removeAttribute("captchaVerified");
+            if (!Boolean.TRUE.equals(captchaVerified)) {
                 return ResponseEntity.status(403).body(Map.of(
                         "success", false,
                         "message", "CAPTCHA verification required"));
@@ -115,7 +118,7 @@ public class AuthController {
             user.setAddress(address != null ? address.trim() : "");
             user.setCountryCode(req.getCountryCode() != null ? req.getCountryCode().trim() : "+1");
             user.setPhoneNumber(req.getPhoneNumber() != null ? req.getPhoneNumber().trim() : "");
-            user.setCaptchaVerified(req.isCaptchaVerified());
+            user.setCaptchaVerified(true);
 
             if (dob != null && !dob.isBlank()) {
                 try {
