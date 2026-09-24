@@ -258,8 +258,17 @@ public class DemoTradingController {
             accountPersisted = true;
 
             if (idempotencyRecord != null) {
-                idempotencyRecord.setStatus("COMPLETED");
-                tradeIdempotencyRepository.save(idempotencyRecord);
+                try {
+                    idempotencyRecord.setStatus("COMPLETED");
+                    tradeIdempotencyRepository.save(idempotencyRecord);
+                } catch (Exception idempotencyFailure) {
+                    // The account write already succeeded. Never delete the idempotency
+                    // record or retry the trade, because that could execute it twice.
+                    // The PROCESSING record will expire via its TTL and the failure is logged.
+                    org.slf4j.LoggerFactory.getLogger(DemoTradingController.class)
+                            .error("Trade persisted but idempotency completion failed userId={} key={}",
+                                    userId, idempotencyKey, idempotencyFailure);
+                }
             }
 
             notifyTradeByEmail(userId, type, symbol, companyName, quantity, price, totalAmount, account);
