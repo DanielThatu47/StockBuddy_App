@@ -34,7 +34,7 @@ public class PreferencesController {
                     .orElseGet(() -> createDefaultPreferences(userId));
             return ResponseEntity.ok(Map.of("success", true, "preferences", prefs));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("success", false, "message", e.getMessage()));
+            return ResponseEntity.status(500).body(Map.of("success", false, "message", "Server error"));
         }
     }
 
