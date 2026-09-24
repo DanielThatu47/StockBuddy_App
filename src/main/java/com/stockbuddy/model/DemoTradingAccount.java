@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -20,6 +21,10 @@ public class DemoTradingAccount {
 
 	@Id
 	private String id;
+
+	/** Optimistic locking prevents concurrent trade/reset/update requests from overwriting each other. */
+	@Version
+	private Long version;
 
 	@Indexed(unique = true)
 	private String userId;
