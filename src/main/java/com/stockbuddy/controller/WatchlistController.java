@@ -4,6 +4,7 @@ package com.stockbuddy.controller;
 import com.stockbuddy.model.WatchlistEntry;
 import com.stockbuddy.repository.WatchlistEntryRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -12,6 +13,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Locale;
 
 @RestController
 @RequestMapping("/api/watchlist")
@@ -34,19 +36,27 @@ public class WatchlistController {
 		if (symbol == null || symbol.isBlank()) {
 			return ResponseEntity.badRequest().body(Map.of("success", false, "message", "symbol is required"));
 		}
-		symbol = symbol.trim();
+		symbol = symbol.trim().toUpperCase(Locale.ROOT);
+		if (symbol.length() > 32) {
+			return ResponseEntity.badRequest().body(Map.of("success", false, "message", "symbol is too long"));
+		}
 		if (watchlistRepository.findByUserIdAndSymbol(userId, symbol).isPresent()) {
 			return ResponseEntity.ok(Map.of("success", true, "message", "Already in watchlist", "duplicate", true));
 		}
 		WatchlistEntry e = new WatchlistEntry();
 		e.setUserId(userId);
 		e.setSymbol(symbol);
-		e.setDisplaySymbol(str(body, "displaySymbol", symbol));
-		e.setDescription(str(body, "description", ""));
-		e.setExchange(str(body, "exchange", ""));
+		String displaySymbol = str(body, "displaySymbol", symbol);
+		String description = str(body, "description", "");
+		String exchange = str(body, "exchange", "");
+		if (displaySymbol.length() > 64 || description.length() > 500 || exchange.length() > 64) {
+			return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Watchlist field is too long"));
+		}
+		e.setDisplaySymbol(displaySymbol);
+		e.setDescription(description);
+		e.setExchange(exchange);
 		e.setCreatedAt(new Date());
-		watchlistRepository.save(e);
-		return ResponseEntity.ok(Map.of("success", true, "message", "Added to watchlist", "entry", e));
+		try {\n\t\t\twatchlistRepository.save(e);\n\t\t} catch (DuplicateKeyException ex) {\n\t\t\treturn ResponseEntity.ok(Map.of("success", true, "message", "Already in watchlist", "duplicate", true));\n\t\t}\n\t\treturn ResponseEntity.ok(Map.of("success", true, "message", "Added to watchlist", "entry", e));
 	}
 
 	@DeleteMapping
@@ -55,11 +65,11 @@ public class WatchlistController {
 		if (symbol == null || symbol.isBlank()) {
 			return ResponseEntity.badRequest().body(Map.of("success", false, "message", "symbol query parameter is required"));
 		}
-		Optional<WatchlistEntry> opt = watchlistRepository.findByUserIdAndSymbol(userId, symbol.trim());
+		String normalizedSymbol = symbol.trim().toUpperCase(Locale.ROOT);\n\t\tOptional<WatchlistEntry> opt = watchlistRepository.findByUserIdAndSymbol(userId, normalizedSymbol);
 		if (opt.isEmpty()) {
 			return ResponseEntity.status(404).body(Map.of("success", false, "message", "Not in watchlist"));
 		}
-		watchlistRepository.deleteByUserIdAndSymbol(userId, symbol.trim());
+		watchlistRepository.deleteByUserIdAndSymbol(userId, normalizedSymbol);
 		return ResponseEntity.ok(Map.of("success", true, "message", "Removed from watchlist"));
 	}
 
