@@ -15,6 +15,8 @@ public interface PredictionRepository extends MongoRepository<Prediction, String
 
     Optional<Prediction> findByTaskId(String taskId);
 
+    Optional<Prediction> findByTaskIdAndUserId(String taskId, String userId);
+
     Optional<Prediction> findByUserIdAndSymbolAndStatusIn(String userId, String symbol, List<String> statuses);
 
     List<Prediction> findByIdInAndUserId(List<String> ids, String userId);
