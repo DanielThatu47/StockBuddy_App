@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.util.*;
 import java.util.Locale;
@@ -196,9 +197,11 @@ public class DemoTradingController {
 
             return ResponseEntity.ok(account);
 
+        } catch (OptimisticLockingFailureException e) {
+            return ResponseEntity.status(409).body(
+                    Map.of("error", "Trading account was modified by another request. Please retry."));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(
-                    Map.of("error", "Server error", "message", e.getMessage()));
+            return ResponseEntity.status(500).body(Map.of("error", "Server error"));
         }
     }
 
