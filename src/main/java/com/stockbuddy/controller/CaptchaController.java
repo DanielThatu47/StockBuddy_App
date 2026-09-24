@@ -63,6 +63,7 @@ public class CaptchaController {
         boolean isValid = expected.equals(userInput); // case-sensitive
 
         if (isValid) {
+            session.setAttribute("captchaVerified", Boolean.TRUE);
             return ResponseEntity.ok(Map.of("success", true));
         } else {
             return ResponseEntity.ok(Map.of(
