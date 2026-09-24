@@ -8,10 +8,12 @@ import com.stockbuddy.dto.HoldingUpdateItem;
 import com.stockbuddy.model.DemoTradingAccount;
 import com.stockbuddy.model.Holding;
 import com.stockbuddy.model.Transaction;
+import com.stockbuddy.model.TradeIdempotency;
 import com.stockbuddy.model.User;
 import com.stockbuddy.model.UserPreferences;
 import com.stockbuddy.repository.DemoTradingAccountRepository;
 import com.stockbuddy.repository.UserPreferencesRepository;
+import com.stockbuddy.repository.TradeIdempotencyRepository;
 import com.stockbuddy.repository.UserRepository;
 import com.stockbuddy.service.EmailService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +38,8 @@ public class DemoTradingController {
     private UserPreferencesRepository preferencesRepository;
     @Autowired
     private EmailService emailService;
+    @Autowired
+    private TradeIdempotencyRepository tradeIdempotencyRepository;
 
     // ───────────────────────────────────────────────────────────────
     // GET /api/demotrading/account
@@ -43,6 +47,44 @@ public class DemoTradingController {
     @GetMapping("/account")
     public ResponseEntity<?> getAccount(Authentication auth) {
         String userId = (String) auth.getPrincipal();
+        String idempotencyKey = req.getIdempotencyKey() == null
+                ? "" : req.getIdempotencyKey().trim();
+        if (idempotencyKey.length() > 128) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Idempotency key is too long"));
+        }
+
+        TradeIdempotency idempotencyRecord = null;
+        if (!idempotencyKey.isBlank()) {
+            Optional<TradeIdempotency> existing = tradeIdempotencyRepository
+                    .findByUserIdAndIdempotencyKey(userId, idempotencyKey);
+            if (existing.isPresent()) {
+                if (existing.get().isCompleted()) {
+                    return tradingRepo.findByUserId(userId)
+                            .map(ResponseEntity::ok)
+                            .orElseGet(() -> ResponseEntity.status(404).body(
+                                    Map.of("error", "Trading account not found")));
+                }
+                return ResponseEntity.status(409).body(Map.of(
+                        "error", "This trade request is already being processed. Please retry later."));
+            }
+
+            idempotencyRecord = new TradeIdempotency();
+            idempotencyRecord.setUserId(userId);
+            idempotencyRecord.setIdempotencyKey(idempotencyKey);
+            idempotencyRecord.setStatus("PROCESSING");
+            idempotencyRecord.setSymbol(normalizeSymbol(req.getSymbol()));
+            idempotencyRecord.setType(req.getType());
+            idempotencyRecord.setQuantity(req.getQuantity());
+            idempotencyRecord.setPrice(req.getPrice());
+
+            try {
+                idempotencyRecord = tradeIdempotencyRepository.save(idempotencyRecord);
+            } catch (DuplicateKeyException e) {
+                return ResponseEntity.status(409).body(Map.of(
+                        "error", "This trade request is already being processed. Please retry later."));
+            }
+        }
+
         try {
             DemoTradingAccount account = tradingRepo.findByUserId(userId)
                     .orElseGet(() -> createDefaultAccount(userId));
@@ -194,14 +236,25 @@ public class DemoTradingController {
             account.recalculate();
             tradingRepo.save(account);
 
+            if (idempotencyRecord != null) {
+                idempotencyRecord.setStatus("COMPLETED");
+                tradeIdempotencyRepository.save(idempotencyRecord);
+            }
+
             notifyTradeByEmail(userId, type, symbol, companyName, quantity, price, totalAmount, account);
 
             return ResponseEntity.ok(account);
 
         } catch (OptimisticLockingFailureException e) {
+            if (idempotencyRecord != null) {
+                tradeIdempotencyRepository.deleteById(idempotencyRecord.getId());
+            }
             return ResponseEntity.status(409).body(
                     Map.of("error", "Trading account was modified by another request. Please retry."));
         } catch (Exception e) {
+            if (idempotencyRecord != null) {
+                tradeIdempotencyRepository.deleteById(idempotencyRecord.getId());
+            }
             return ResponseEntity.status(500).body(Map.of("error", "Server error"));
         }
     }
