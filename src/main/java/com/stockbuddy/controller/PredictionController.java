@@ -165,7 +165,7 @@ public class PredictionController {
                                                   Authentication auth) {
         String userId = (String) auth.getPrincipal();
         try {
-            Optional<Prediction> opt = predictionRepository.findByTaskId(taskId);
+            Optional<Prediction> opt = predictionRepository.findByTaskIdAndUserId(taskId, userId);
             if (opt.isEmpty()) {
                 return ResponseEntity.status(404).body(Map.of("message", "Prediction not found"));
             }
