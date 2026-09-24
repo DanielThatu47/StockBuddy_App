@@ -75,8 +75,8 @@ public class DemoTradingController {
             return ResponseEntity.badRequest().body(Map.of("error", "Trade type must be BUY or SELL"));
         if (req.getQuantity() < 1)
             return ResponseEntity.badRequest().body(Map.of("error", "Quantity must be at least 1"));
-        if (req.getPrice() <= 0)
-            return ResponseEntity.badRequest().body(Map.of("error", "Price must be a positive number"));
+        if (req.getPrice() <= 0 || !Double.isFinite(req.getPrice()))
+            return ResponseEntity.badRequest().body(Map.of("error", "Price must be a positive finite number"));
 
         String idempotencyKey = req.getIdempotencyKey() == null
                 ? "" : req.getIdempotencyKey().trim();
@@ -89,7 +89,18 @@ public class DemoTradingController {
             Optional<TradeIdempotency> existing = tradeIdempotencyRepository
                     .findByUserIdAndIdempotencyKey(userId, idempotencyKey);
             if (existing.isPresent()) {
-                if (existing.get().isCompleted()) {
+                TradeIdempotency saved = existing.get();
+                boolean sameRequest = normalizeSymbol(req.getSymbol()).equals(saved.getSymbol())
+                        && Objects.equals(req.getType(), saved.getType())
+                        && req.getQuantity() == saved.getQuantity()
+                        && Double.compare(req.getPrice(), saved.getPrice()) == 0;
+
+                if (!sameRequest) {
+                    return ResponseEntity.status(409).body(Map.of(
+                            "error", "Idempotency key was already used for a different trade request."));
+                }
+
+                if (saved.isCompleted()) {
                     return tradingRepo.findByUserId(userId)
                             .map(ResponseEntity::ok)
                             .orElseGet(() -> ResponseEntity.status(404).body(
