@@ -12,6 +12,8 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 @Data
 @NoArgsConstructor
@@ -220,11 +222,13 @@ public class DemoTradingAccount {
 	 * before saving (mirrors Mongoose pre-save hook).
 	 */
 	public void recalculate() {
-		double holdingsValue = holdings.stream().mapToDouble(h -> h.getCurrentValue()).sum();
+		double holdingsValue = money(holdings.stream().map(h -> BigDecimal.valueOf(h.getCurrentValue())).reduce(BigDecimal.ZERO, BigDecimal::add));
 
-		this.equity = holdingsValue + this.balance;
-		this.totalProfitLoss = this.equity - this.initialBalance;
-		this.totalProfitLossPercentage = (this.totalProfitLoss / this.initialBalance) * 100.0;
+		this.equity = money(BigDecimal.valueOf(holdingsValue).add(BigDecimal.valueOf(this.balance)));
+		this.totalProfitLoss = money(BigDecimal.valueOf(this.equity).subtract(BigDecimal.valueOf(this.initialBalance)));
+		this.totalProfitLossPercentage = this.initialBalance == 0 ? 0 : BigDecimal.valueOf(this.totalProfitLoss)
+                .divide(BigDecimal.valueOf(this.initialBalance), 8, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100)).doubleValue();
 		this.lastUpdated = new Date();
 	}
 }
