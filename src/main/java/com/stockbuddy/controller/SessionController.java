@@ -98,7 +98,7 @@ public class SessionController {
 					"isPrimaryDevice", isPrimaryDevice,
 					"message", "Session registered"));
 		} catch (Exception e) {
-			return ResponseEntity.status(500).body(Map.of("success", false, "message", e.getMessage()));
+			return ResponseEntity.status(500).body(Map.of("success", false, "message", "Server error"));
 		}
 	}
 
@@ -131,7 +131,7 @@ public class SessionController {
 					sessionRepository.findByUserIdAndIsActiveTrueOrderByLastActiveDesc(userId);
 			return ResponseEntity.ok(sessions);
 		} catch (Exception e) {
-			return ResponseEntity.status(500).body(Map.of("message", e.getMessage()));
+			return ResponseEntity.status(500).body(Map.of("message", "Server error"));
 		}
 	}
 
