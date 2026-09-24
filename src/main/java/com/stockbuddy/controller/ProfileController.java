@@ -266,31 +266,15 @@ public class ProfileController {
                 } catch (Exception ignored) {}
             }
 
-            // Delete user's predictions
-            try {
-                predictionRepository.deleteByUserId(userId);
-            } catch (Exception ignored) {}
+            // Delete dependent data. Do not swallow database failures: deleting the
+            // account after a partial cleanup would leave orphaned user data.
+            predictionRepository.deleteByUserId(userId);
+            tradingAccountRepository.deleteByUserId(userId);
+            preferencesRepository.deleteByUserId(userId);
+            sessionRepository.deleteByUserId(userId);
+            watchlistEntryRepository.deleteByUserId(userId);
 
-            // Delete demo trading account
-            try {
-                tradingAccountRepository.deleteByUserId(userId);
-            } catch (Exception ignored) {}
-
-            // Delete user preferences
-            try {
-                preferencesRepository.deleteByUserId(userId);
-            } catch (Exception ignored) {}
-
-            // Delete user sessions
-            try {
-                sessionRepository.deleteByUserId(userId);
-            } catch (Exception ignored) {}
-
-            try {
-                watchlistEntryRepository.deleteByUserId(userId);
-            } catch (Exception ignored) {}
-
-            // Delete the account
+            // Delete the account only after dependent collections were cleared.
             userRepository.deleteById(userId);
 
             return ResponseEntity.ok(Map.of(
