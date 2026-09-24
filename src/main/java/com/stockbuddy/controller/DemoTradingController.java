@@ -49,7 +49,7 @@ public class DemoTradingController {
             return ResponseEntity.ok(account);
         } catch (Exception e) {
             return ResponseEntity.status(500).body(
-                    Map.of("error", "Server error", "message", e.getMessage()));
+                    Map.of("error", "Server error"));
         }
     }
 
