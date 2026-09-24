@@ -57,16 +57,16 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody RegisterRequest req) {
         try {
-            String name     = req.getName();
-            String email    = req.getEmail();
+            String name     = req.getName() != null ? req.getName().trim() : null;
+            String email    = req.getEmail() != null ? req.getEmail().trim().toLowerCase(Locale.ROOT) : null;
             String password = req.getPassword();
             String address  = req.getAddress();
             String dob      = req.getDateOfBirth();
 
             // Validation
-            if (name == null || name.isBlank() ||
-                email == null || email.isBlank() ||
-                password == null || password.isBlank()) {
+            if (name == null || name.isBlank() || name.length() > 100 ||
+                email == null || email.isBlank() || email.length() > 254 ||
+                password == null || password.isBlank() || password.length() > 128) {
 
                 Map<String, Object> errors = new LinkedHashMap<>();
                 if (name == null || name.isBlank()) errors.put("name", "Name is required");
@@ -93,7 +93,7 @@ public class AuthController {
                         "message", "Invalid email format"));
             }
 
-            if (userRepository.existsByEmail(email.toLowerCase())) {
+            if (userRepository.existsByEmail(email)) {
                 return ResponseEntity.badRequest().body(Map.of(
                         "success", false,
                         "message", "User already exists"));
@@ -109,8 +109,8 @@ public class AuthController {
 
             // Create user
             User user = new User();
-            user.setName(name.trim());
-            user.setEmail(email.toLowerCase().trim());
+            user.setName(name);
+            user.setEmail(email);
             user.setPassword(passwordEncoder.encode(password));
             user.setAddress(address != null ? address.trim() : "");
             user.setCountryCode(req.getCountryCode() != null ? req.getCountryCode().trim() : "+1");
@@ -191,7 +191,13 @@ public class AuthController {
                         "success", false, "message", "All fields are required"));
             }
 
-            Optional<User> optUser = userRepository.findByEmail(req.getEmail());
+            String email = req.getEmail().trim().toLowerCase(Locale.ROOT);
+            if (email.length() > 254 || req.getPassword().length() > 128) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "success", false, "message", "Invalid credentials"));
+            }
+
+            Optional<User> optUser = userRepository.findByEmail(email);
             if (optUser.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of(
                         "success", false, "message", "Invalid credentials"));
