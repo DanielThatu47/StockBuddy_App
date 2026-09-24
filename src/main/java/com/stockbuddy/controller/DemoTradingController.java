@@ -451,11 +451,12 @@ public class DemoTradingController {
                         int    newQty   = (int) h.get("quantity") + tx.getQuantity();
                         double avgCost  = (double) h.get("averageCost");
                         double qty      = (double)(int) h.get("quantity");
-                        double newTotal = avgCost * qty - tx.getTotalAmount();
+                        double newTotal = money(BigDecimal.valueOf(avgCost).multiply(BigDecimal.valueOf((int) h.get("quantity")))
+                                .subtract(BigDecimal.valueOf(tx.getTotalAmount())));
                         h.put("quantity",     newQty);
                         h.put("averageCost",  newTotal / newQty);
                         h.put("currentPrice", tx.getPrice());
-                        h.put("currentValue", newQty * tx.getPrice());
+                        h.put("currentValue", money(BigDecimal.valueOf(newQty).multiply(BigDecimal.valueOf(tx.getPrice()))));
                     } else {
                         Map<String, Object> h = new LinkedHashMap<>();
                         h.put("symbol",       txSym);
@@ -463,7 +464,7 @@ public class DemoTradingController {
                         h.put("quantity",     tx.getQuantity());
                         h.put("averageCost",  tx.getPrice());
                         h.put("currentPrice", tx.getPrice());
-                        h.put("currentValue", tx.getQuantity() * tx.getPrice());
+                        h.put("currentValue", money(BigDecimal.valueOf(tx.getQuantity()).multiply(BigDecimal.valueOf(tx.getPrice()))));
                         currentHoldings.add(h);
                     }
 
@@ -488,10 +489,10 @@ public class DemoTradingController {
                     }
                 }
 
-                double holdingsValue = currentHoldings.stream()
-                        .mapToDouble(h -> (double) h.get("currentValue"))
-                        .sum();
-                double equity = currentBalance + holdingsValue;
+                double holdingsValue = money(currentHoldings.stream()
+                        .map(h -> BigDecimal.valueOf((double) h.get("currentValue")))
+                        .reduce(BigDecimal.ZERO, BigDecimal::add));
+                double equity = money(BigDecimal.valueOf(currentBalance).add(BigDecimal.valueOf(holdingsValue)));
 
                 Map<String, Object> snap = new LinkedHashMap<>();
                 snap.put("date",          tx.getDate());
@@ -507,8 +508,9 @@ public class DemoTradingController {
             // Add current snapshot if time has passed since last transaction
             long daysSinceLast = (now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24);
             if (daysSinceLast > 0) {
-                double holdingsValue = account.getHoldings().stream()
-                        .mapToDouble(Holding::getCurrentValue).sum();
+                double holdingsValue = money(account.getHoldings().stream()
+                        .map(h -> BigDecimal.valueOf(h.getCurrentValue()))
+                        .reduce(BigDecimal.ZERO, BigDecimal::add));
                 Map<String, Object> curSnap = new LinkedHashMap<>();
                 curSnap.put("date",          now);
                 curSnap.put("equity",        account.getEquity());
@@ -653,8 +655,8 @@ public class DemoTradingController {
 
     private double[] change(double oldVal, double newVal) {
         if (oldVal == 0) return new double[]{0, 0};
-        double c = newVal - oldVal;
-        double p = (c / oldVal) * 100;
+        double c = money(BigDecimal.valueOf(newVal).subtract(BigDecimal.valueOf(oldVal)));
+        double p = percentage(c, oldVal);
         return new double[]{c, p};
     }
 
