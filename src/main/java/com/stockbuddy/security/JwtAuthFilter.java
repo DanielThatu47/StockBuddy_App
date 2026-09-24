@@ -75,7 +75,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                     logger.warn("JWT rejected for {} (invalid signature, expired, or malformed)");
                 }
             } catch (Exception e) {
-                logger.warn("JWT validation failed: " + e.getMessage());
+                logger.warn("JWT validation failed for request {}", request.getRequestURI(), e);
             }
         }
 
