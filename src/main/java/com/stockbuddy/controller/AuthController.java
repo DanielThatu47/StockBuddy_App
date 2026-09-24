@@ -177,8 +177,7 @@ public class AuthController {
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of(
                     "success", false,
-                    "message", "Server error during registration",
-                    "error", e.getMessage()));
+                    "message", "Server error during registration"));
         }
     }
     // ───────────────────────────────────────────────
@@ -276,8 +275,7 @@ public class AuthController {
                 res.put("message", "A verification code was sent to your registered email address.");
             } else {
                 res.put("message",
-                        "Email is not configured on the server. Use the development code below to continue.");
-                res.put("devCode", code);
+                        "Email delivery is temporarily unavailable. Please try again later.");
             }
             return ResponseEntity.ok(res);
         } catch (Exception e) {
@@ -387,8 +385,7 @@ public class AuthController {
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of(
                     "success", false,
-                    "message", "Server error during password change",
-                    "error", e.getMessage()));
+                    "message", "Server error during password change"));
         }
     }
 
