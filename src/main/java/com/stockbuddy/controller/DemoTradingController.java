@@ -138,6 +138,10 @@ public class DemoTradingController {
             int    quantity    = req.getQuantity();
             double price       = req.getPrice();
             double totalAmount = quantity * price;
+            if (!Double.isFinite(totalAmount) || totalAmount <= 0) {
+                return ResponseEntity.badRequest().body(
+                        Map.of("error", "Trade amount is outside the supported range"));
+            }
 
             if ("BUY".equals(type)) {
                 // ── Check sufficient balance ──────────────────────────────
