@@ -56,7 +56,12 @@ public class WatchlistController {
 		e.setDescription(description);
 		e.setExchange(exchange);
 		e.setCreatedAt(new Date());
-		try {\n\t\t\twatchlistRepository.save(e);\n\t\t} catch (DuplicateKeyException ex) {\n\t\t\treturn ResponseEntity.ok(Map.of("success", true, "message", "Already in watchlist", "duplicate", true));\n\t\t}\n\t\treturn ResponseEntity.ok(Map.of("success", true, "message", "Added to watchlist", "entry", e));
+		try {
+			watchlistRepository.save(e);
+		} catch (DuplicateKeyException ex) {
+			return ResponseEntity.ok(Map.of("success", true, "message", "Already in watchlist", "duplicate", true));
+		}
+		return ResponseEntity.ok(Map.of("success", true, "message", "Added to watchlist", "entry", e));
 	}
 
 	@DeleteMapping
@@ -65,7 +70,8 @@ public class WatchlistController {
 		if (symbol == null || symbol.isBlank()) {
 			return ResponseEntity.badRequest().body(Map.of("success", false, "message", "symbol query parameter is required"));
 		}
-		String normalizedSymbol = symbol.trim().toUpperCase(Locale.ROOT);\n\t\tOptional<WatchlistEntry> opt = watchlistRepository.findByUserIdAndSymbol(userId, normalizedSymbol);
+		String normalizedSymbol = symbol.trim().toUpperCase(Locale.ROOT);
+		Optional<WatchlistEntry> opt = watchlistRepository.findByUserIdAndSymbol(userId, normalizedSymbol);
 		if (opt.isEmpty()) {
 			return ResponseEntity.status(404).body(Map.of("success", false, "message", "Not in watchlist"));
 		}
