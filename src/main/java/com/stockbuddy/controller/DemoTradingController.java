@@ -25,6 +25,7 @@ import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.util.*;
 import java.util.Locale;
+import java.math.BigDecimal;
 
 @RestController
 @RequestMapping("/api/demotrading")
@@ -137,7 +138,9 @@ public class DemoTradingController {
             String type        = req.getType();
             int    quantity    = req.getQuantity();
             double price       = req.getPrice();
-            double totalAmount = quantity * price;
+            BigDecimal priceValue = BigDecimal.valueOf(price);
+            BigDecimal totalAmountValue = priceValue.multiply(BigDecimal.valueOf(quantity));
+            double totalAmount = totalAmountValue.doubleValue();
             if (!Double.isFinite(totalAmount) || totalAmount <= 0) {
                 return ResponseEntity.badRequest().body(
                         Map.of("error", "Trade amount is outside the supported range"));
@@ -145,14 +148,14 @@ public class DemoTradingController {
 
             if ("BUY".equals(type)) {
                 // ── Check sufficient balance ──────────────────────────────
-                if (account.getBalance() < totalAmount) {
+                if (BigDecimal.valueOf(account.getBalance()).compareTo(totalAmountValue) < 0) {
                     return ResponseEntity.badRequest().body(Map.of(
                             "error",     "Insufficient funds",
                             "available", account.getBalance(),
                             "required",  totalAmount));
                 }
 
-                account.setBalance(account.getBalance() - totalAmount);
+                account.setBalance(BigDecimal.valueOf(account.getBalance()).subtract(totalAmountValue).doubleValue());
 
                 // Update or create holding
                 Optional<Holding> existingOpt = account.getHoldings().stream()
@@ -162,8 +165,8 @@ public class DemoTradingController {
                 if (existingOpt.isPresent()) {
                     Holding h = existingOpt.get();
                     int    newQty       = h.getQuantity() + quantity;
-                    double newTotalVal  = h.getPurchaseValue() + totalAmount;
-                    double newAvgPrice  = newTotalVal / newQty;
+                    double newTotalVal  = BigDecimal.valueOf(h.getPurchaseValue()).add(totalAmountValue).doubleValue();
+                    double newAvgPrice  = BigDecimal.valueOf(newTotalVal).divide(BigDecimal.valueOf(newQty), 12, java.math.RoundingMode.HALF_UP).doubleValue();
                     double newCurVal    = newQty * price;
                     double profit       = newCurVal - newTotalVal;
 
@@ -213,15 +216,15 @@ public class DemoTradingController {
                             "required",  quantity));
                 }
 
-                account.setBalance(account.getBalance() + totalAmount);
+                account.setBalance(BigDecimal.valueOf(account.getBalance()).add(totalAmountValue).doubleValue());
 
                 int newQty = h.getQuantity() - quantity;
 
                 if (newQty == 0) {
                     account.getHoldings().remove(idx);
                 } else {
-                    double soldValue     = quantity * h.getAveragePrice();
-                    double newPurchaseVal = h.getPurchaseValue() - soldValue;
+                    double soldValue     = BigDecimal.valueOf(quantity).multiply(BigDecimal.valueOf(h.getAveragePrice())).doubleValue();
+                    double newPurchaseVal = BigDecimal.valueOf(h.getPurchaseValue()).subtract(BigDecimal.valueOf(soldValue)).doubleValue();
                     double newCurVal      = newQty * price;
                     double profit         = newCurVal - newPurchaseVal;
 
