@@ -18,6 +18,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Map;
@@ -26,6 +28,8 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/api/profile")
 public class ProfileController {
+
+    private static final Logger log = LoggerFactory.getLogger(ProfileController.class);
 
     @Autowired private UserRepository userRepository;
     @Autowired private PredictionRepository predictionRepository;
@@ -165,11 +169,10 @@ public class ProfileController {
                     "user", userService.toDto(user)));
 
         } catch (Exception e) {
-        	  e.printStackTrace();
+            log.error("Profile picture upload failed", e);
             return ResponseEntity.status(500).body(Map.of(
                     "success", false,
-                    "message", "Image upload to cloud storage failed",
-                    "error", e.getMessage()));
+                    "message", "Image upload to cloud storage failed"));
         }
     }
 
@@ -194,14 +197,11 @@ public class ProfileController {
                     Map<String, Object> deleteResult = cloudinaryService.deleteByUrl(user.getProfilePicture());
                     String result = (String) deleteResult.get("result");
 
-                    if ("deleted".equals(result)) {
-                        System.out.println("Successfully deleted image from Cloudinary");
-                    } else {
-                        System.out.println("Partial or unknown deletion result: " + deleteResult);
+                    if (!"deleted".equals(result)) {
+                        log.warn("Cloudinary profile image deletion returned result={}", result);
                     }
                 } catch (Exception e) {
-                    System.err.println("Error deleting from Cloudinary: " + e.getMessage());
-                    // Continue even if Cloudinary deletion fails
+                    log.warn("Cloudinary profile image deletion failed; continuing account update", e);
                 }
 
                 user.setProfilePicture("");
@@ -266,31 +266,15 @@ public class ProfileController {
                 } catch (Exception ignored) {}
             }
 
-            // Delete user's predictions
-            try {
-                predictionRepository.deleteByUserId(userId);
-            } catch (Exception ignored) {}
+            // Delete dependent data. Do not swallow database failures: deleting the
+            // account after a partial cleanup would leave orphaned user data.
+            predictionRepository.deleteByUserId(userId);
+            tradingAccountRepository.deleteByUserId(userId);
+            preferencesRepository.deleteByUserId(userId);
+            sessionRepository.deleteByUserId(userId);
+            watchlistEntryRepository.deleteByUserId(userId);
 
-            // Delete demo trading account
-            try {
-                tradingAccountRepository.deleteByUserId(userId);
-            } catch (Exception ignored) {}
-
-            // Delete user preferences
-            try {
-                preferencesRepository.deleteByUserId(userId);
-            } catch (Exception ignored) {}
-
-            // Delete user sessions
-            try {
-                sessionRepository.deleteByUserId(userId);
-            } catch (Exception ignored) {}
-
-            try {
-                watchlistEntryRepository.deleteByUserId(userId);
-            } catch (Exception ignored) {}
-
-            // Delete the account
+            // Delete the account only after dependent collections were cleared.
             userRepository.deleteById(userId);
 
             return ResponseEntity.ok(Map.of(

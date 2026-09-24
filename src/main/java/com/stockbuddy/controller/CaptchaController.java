@@ -63,13 +63,12 @@ public class CaptchaController {
         boolean isValid = expected.equals(userInput); // case-sensitive
 
         if (isValid) {
+            session.setAttribute("captchaVerified", Boolean.TRUE);
             return ResponseEntity.ok(Map.of("success", true));
         } else {
             return ResponseEntity.ok(Map.of(
                     "success",       false,
-                    "message",       "Invalid CAPTCHA. Please ensure you enter the exact characters shown (case-sensitive).",
-                    "expectedValue", expected,   // for debugging; remove in production
-                    "userValue",     userInput    // for debugging; remove in production
+                    "message",       "Invalid CAPTCHA. Please ensure you enter the exact characters shown (case-sensitive)."
             ));
         }
     }

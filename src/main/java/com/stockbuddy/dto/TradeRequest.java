@@ -10,6 +10,9 @@ public class TradeRequest {
     private String type;   // BUY | SELL
     private int quantity;
     private double price;
+
+    /** Optional client-generated key used to prevent duplicate trade execution on retries. */
+    private String idempotencyKey;
 	public String getSymbol() {
 		return symbol;
 	}
@@ -39,6 +42,12 @@ public class TradeRequest {
 	}
 	public void setPrice(double price) {
 		this.price = price;
+	}
+	public String getIdempotencyKey() {
+		return idempotencyKey;
+	}
+	public void setIdempotencyKey(String idempotencyKey) {
+		this.idempotencyKey = idempotencyKey;
 	}
     
 }

@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Date;
 import java.util.Map;
+import java.util.Locale;
 
 /**
  * User Preferences
@@ -34,7 +35,7 @@ public class PreferencesController {
                     .orElseGet(() -> createDefaultPreferences(userId));
             return ResponseEntity.ok(Map.of("success", true, "preferences", prefs));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("success", false, "message", e.getMessage()));
+            return ResponseEntity.status(500).body(Map.of("success", false, "message", "Server error"));
         }
     }
 
@@ -57,9 +58,9 @@ public class PreferencesController {
             if (body.containsKey("tradingSignals"))     prefs.setTradingSignals(toBool(body.get("tradingSignals")));
             if (body.containsKey("systemUpdates"))      prefs.setSystemUpdates(toBool(body.get("systemUpdates")));
             if (body.containsKey("marketingEmails"))    prefs.setMarketingEmails(toBool(body.get("marketingEmails")));
-            if (body.containsKey("language"))           prefs.setLanguage(body.get("language").toString());
-            if (body.containsKey("currency"))           prefs.setCurrency(body.get("currency").toString());
-            if (body.containsKey("timezone"))           prefs.setTimezone(body.get("timezone").toString());
+            if (body.containsKey("language"))           prefs.setLanguage(normalizeValue(body.get("language"), 32));
+            if (body.containsKey("currency"))           prefs.setCurrency(normalizeValue(body.get("currency"), 8).toUpperCase(Locale.ROOT));
+            if (body.containsKey("timezone"))           prefs.setTimezone(normalizeValue(body.get("timezone"), 64));
             if (body.containsKey("dataSharing"))        prefs.setDataSharing(toBool(body.get("dataSharing")));
             if (body.containsKey("activityTracking"))   prefs.setActivityTracking(toBool(body.get("activityTracking")));
 
@@ -78,8 +79,8 @@ public class PreferencesController {
                                                Authentication auth) {
         String userId = (String) auth.getPrincipal();
         try {
-            String token = body.get("token") != null ? body.get("token").toString() : null;
-            if (token == null || token.isBlank()) {
+            String token = body.get("token") != null ? body.get("token").toString().trim() : null;
+            if (token == null || token.isBlank() || token.length() > 512) {
                 return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Token is required"));
             }
 
@@ -100,6 +101,17 @@ public class PreferencesController {
         UserPreferences prefs = new UserPreferences();
         prefs.setUserId(userId);
         return preferencesRepository.save(prefs);
+    }
+
+    private String normalizeValue(Object value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        String result = value.toString().trim();
+        if (result.length() > maxLength) {
+            throw new IllegalArgumentException("Preference value too long");
+        }
+        return result;
     }
 
     private boolean toBool(Object val) {

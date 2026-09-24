@@ -21,6 +21,7 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Locale;
 
 /**
  * Two-Factor Authentication and Email Verification
@@ -50,7 +51,10 @@ public class TwoFactorController {
 	@PostMapping("/send-otp")
 	public ResponseEntity<?> sendOtp(@RequestBody Map<String, Object> body, Authentication auth) {
 		String userId = (String) auth.getPrincipal();
-		String purpose = body.get("purpose") != null ? body.get("purpose").toString() : "2FA_ENABLE";
+		String purpose = body.get("purpose") != null ? body.get("purpose").toString().trim().toUpperCase(Locale.ROOT) : "2FA_ENABLE";
+		if (!"2FA_ENABLE".equals(purpose) && !"EMAIL_VERIFY".equals(purpose)) {
+			return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Invalid verification purpose"));
+		}
 
 		try {
 			// delete old OTP
@@ -69,7 +73,7 @@ public class TwoFactorController {
 					emailService.sendOtpEmail(userOpt.get().getEmail(), purpose, otp);
 					mailed = true;
 				} catch (Exception mailEx) {
-					mailEx.printStackTrace();
+					// Do not expose SMTP details or stack traces to the client.
 				}
 			}
 
@@ -80,15 +84,11 @@ public class TwoFactorController {
 							: "Verification code generated (configure SMTP to receive it by email)"));
 			emailbody.put("expiresIn", 300);
 			emailbody.put("sentByEmail", mailed);
-			if (!mailed) {
-				emailbody.put("otpPreview", otp);
-			}
 
 			return ResponseEntity.ok(emailbody);
 
 		} catch (Exception e) {
-			e.printStackTrace(); // 🔥 VERY IMPORTANT
-			return ResponseEntity.status(500).body(Map.of("success", false, "message", e.getMessage()));
+			return ResponseEntity.status(500).body(Map.of("success", false, "message", "Server error while generating verification code"));
 		}
 	}
 
@@ -97,7 +97,10 @@ public class TwoFactorController {
 	public ResponseEntity<?> verifyOtp(@RequestBody VerifyOTPRequest request, Authentication auth) {
 		String userId = (String) auth.getPrincipal();
 		String inputOtp = request.getOtp();
-		String purpose = request.getPurpose() != null ? request.getPurpose() : "2FA_ENABLE";
+		String purpose = request.getPurpose() != null ? request.getPurpose().trim().toUpperCase(Locale.ROOT) : "2FA_ENABLE";
+		if (!"2FA_ENABLE".equals(purpose) && !"EMAIL_VERIFY".equals(purpose)) {
+			return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Invalid verification purpose"));
+		}
 		try {
 			Optional<OTPRecord> opt = otpRepository.findTopByUserIdAndPurposeAndUsedFalseOrderByCreatedAtDesc(userId,
 					purpose);
@@ -146,7 +149,7 @@ public class TwoFactorController {
 							: "Email verified successfully",
 					"preferences", prefs));
 		} catch (Exception e) {
-			return ResponseEntity.status(500).body(Map.of("success", false, "message", e.getMessage()));
+			return ResponseEntity.status(500).body(Map.of("success", false, "message", "Server error"));
 		}
 	}
 

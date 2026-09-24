@@ -8,19 +8,25 @@ import com.stockbuddy.dto.HoldingUpdateItem;
 import com.stockbuddy.model.DemoTradingAccount;
 import com.stockbuddy.model.Holding;
 import com.stockbuddy.model.Transaction;
+import com.stockbuddy.model.TradeIdempotency;
 import com.stockbuddy.model.User;
 import com.stockbuddy.model.UserPreferences;
 import com.stockbuddy.repository.DemoTradingAccountRepository;
 import com.stockbuddy.repository.UserPreferencesRepository;
+import com.stockbuddy.repository.TradeIdempotencyRepository;
 import com.stockbuddy.repository.UserRepository;
 import com.stockbuddy.service.EmailService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.util.*;
 import java.util.Locale;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 @RestController
 @RequestMapping("/api/demotrading")
@@ -34,6 +40,8 @@ public class DemoTradingController {
     private UserPreferencesRepository preferencesRepository;
     @Autowired
     private EmailService emailService;
+    @Autowired
+    private TradeIdempotencyRepository tradeIdempotencyRepository;
 
     // ───────────────────────────────────────────────────────────────
     // GET /api/demotrading/account
@@ -48,7 +56,7 @@ public class DemoTradingController {
             return ResponseEntity.ok(account);
         } catch (Exception e) {
             return ResponseEntity.status(500).body(
-                    Map.of("error", "Server error", "message", e.getMessage()));
+                    Map.of("error", "Server error"));
         }
     }
 
@@ -69,8 +77,60 @@ public class DemoTradingController {
             return ResponseEntity.badRequest().body(Map.of("error", "Trade type must be BUY or SELL"));
         if (req.getQuantity() < 1)
             return ResponseEntity.badRequest().body(Map.of("error", "Quantity must be at least 1"));
-        if (req.getPrice() <= 0)
-            return ResponseEntity.badRequest().body(Map.of("error", "Price must be a positive number"));
+        if (req.getPrice() <= 0 || !Double.isFinite(req.getPrice()))
+            return ResponseEntity.badRequest().body(Map.of("error", "Price must be a positive finite number"));
+
+        String idempotencyKey = req.getIdempotencyKey() == null
+                ? "" : req.getIdempotencyKey().trim();
+        if (idempotencyKey.length() > 128) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Idempotency key is too long"));
+        }
+
+        TradeIdempotency idempotencyRecord = null;
+        boolean accountPersisted = false;
+        if (!idempotencyKey.isBlank()) {
+            Optional<TradeIdempotency> existing = tradeIdempotencyRepository
+                    .findByUserIdAndIdempotencyKey(userId, idempotencyKey);
+            if (existing.isPresent()) {
+                TradeIdempotency saved = existing.get();
+                boolean sameRequest = normalizeSymbol(req.getSymbol()).equals(saved.getSymbol())
+                        && Objects.equals(req.getType(), saved.getType())
+                        && req.getQuantity() == saved.getQuantity()
+                        && Double.compare(req.getPrice(), saved.getPrice()) == 0;
+
+                if (!sameRequest) {
+                    return ResponseEntity.status(409).body(Map.of(
+                            "error", "Idempotency key was already used for a different trade request."));
+                }
+
+                if (saved.isCompleted()) {
+                    Optional<DemoTradingAccount> existingAccount = tradingRepo.findByUserId(userId);
+                    if (existingAccount.isPresent()) {
+                        return ResponseEntity.ok(existingAccount.get());
+                    }
+                    return ResponseEntity.status(404).body(
+                            Map.of("error", "Trading account not found"));
+                }
+                return ResponseEntity.status(409).body(Map.of(
+                        "error", "This trade request is already being processed. Please retry later."));
+            }
+
+            idempotencyRecord = new TradeIdempotency();
+            idempotencyRecord.setUserId(userId);
+            idempotencyRecord.setIdempotencyKey(idempotencyKey);
+            idempotencyRecord.setStatus("PROCESSING");
+            idempotencyRecord.setSymbol(normalizeSymbol(req.getSymbol()));
+            idempotencyRecord.setType(req.getType());
+            idempotencyRecord.setQuantity(req.getQuantity());
+            idempotencyRecord.setPrice(req.getPrice());
+
+            try {
+                idempotencyRecord = tradeIdempotencyRepository.save(idempotencyRecord);
+            } catch (DuplicateKeyException e) {
+                return ResponseEntity.status(409).body(Map.of(
+                        "error", "This trade request is already being processed. Please retry later."));
+            }
+        }
 
         try {
             DemoTradingAccount account = tradingRepo.findByUserId(userId)
@@ -82,18 +142,24 @@ public class DemoTradingController {
             String type        = req.getType();
             int    quantity    = req.getQuantity();
             double price       = req.getPrice();
-            double totalAmount = quantity * price;
+            BigDecimal priceValue = BigDecimal.valueOf(price);
+            BigDecimal totalAmountValue = priceValue.multiply(BigDecimal.valueOf(quantity));
+            double totalAmount = totalAmountValue.doubleValue();
+            if (!Double.isFinite(totalAmount) || totalAmount <= 0) {
+                return ResponseEntity.badRequest().body(
+                        Map.of("error", "Trade amount is outside the supported range"));
+            }
 
             if ("BUY".equals(type)) {
                 // ── Check sufficient balance ──────────────────────────────
-                if (account.getBalance() < totalAmount) {
+                if (BigDecimal.valueOf(account.getBalance()).compareTo(totalAmountValue) < 0) {
                     return ResponseEntity.badRequest().body(Map.of(
                             "error",     "Insufficient funds",
                             "available", account.getBalance(),
                             "required",  totalAmount));
                 }
 
-                account.setBalance(account.getBalance() - totalAmount);
+                account.setBalance(BigDecimal.valueOf(account.getBalance()).subtract(totalAmountValue).doubleValue());
 
                 // Update or create holding
                 Optional<Holding> existingOpt = account.getHoldings().stream()
@@ -103,10 +169,10 @@ public class DemoTradingController {
                 if (existingOpt.isPresent()) {
                     Holding h = existingOpt.get();
                     int    newQty       = h.getQuantity() + quantity;
-                    double newTotalVal  = h.getPurchaseValue() + totalAmount;
-                    double newAvgPrice  = newTotalVal / newQty;
-                    double newCurVal    = newQty * price;
-                    double profit       = newCurVal - newTotalVal;
+                    double newTotalVal  = BigDecimal.valueOf(h.getPurchaseValue()).add(totalAmountValue).doubleValue();
+                    double newAvgPrice  = BigDecimal.valueOf(newTotalVal).divide(BigDecimal.valueOf(newQty), 12, java.math.RoundingMode.HALF_UP).doubleValue();
+                    double newCurVal    = money(BigDecimal.valueOf(newQty).multiply(priceValue));
+                    double profit       = money(BigDecimal.valueOf(newCurVal).subtract(BigDecimal.valueOf(newTotalVal)));
 
                     h.setQuantity(newQty);
                     h.setAveragePrice(newAvgPrice);
@@ -114,7 +180,7 @@ public class DemoTradingController {
                     h.setCurrentPrice(price);
                     h.setCurrentValue(newCurVal);
                     h.setProfit(profit);
-                    h.setProfitPercentage((profit / newTotalVal) * 100);
+                    h.setProfitPercentage(percentage(profit, newTotalVal));
                     h.setLastUpdated(new Date());
                 } else {
                     Holding h = new Holding();
@@ -154,24 +220,24 @@ public class DemoTradingController {
                             "required",  quantity));
                 }
 
-                account.setBalance(account.getBalance() + totalAmount);
+                account.setBalance(BigDecimal.valueOf(account.getBalance()).add(totalAmountValue).doubleValue());
 
                 int newQty = h.getQuantity() - quantity;
 
                 if (newQty == 0) {
                     account.getHoldings().remove(idx);
                 } else {
-                    double soldValue     = quantity * h.getAveragePrice();
-                    double newPurchaseVal = h.getPurchaseValue() - soldValue;
-                    double newCurVal      = newQty * price;
-                    double profit         = newCurVal - newPurchaseVal;
+                    double soldValue     = BigDecimal.valueOf(quantity).multiply(BigDecimal.valueOf(h.getAveragePrice())).doubleValue();
+                    double newPurchaseVal = BigDecimal.valueOf(h.getPurchaseValue()).subtract(BigDecimal.valueOf(soldValue)).doubleValue();
+                    double newCurVal      = money(BigDecimal.valueOf(newQty).multiply(priceValue));
+                    double profit         = money(BigDecimal.valueOf(newCurVal).subtract(BigDecimal.valueOf(newPurchaseVal)));
 
                     h.setQuantity(newQty);
                     h.setPurchaseValue(newPurchaseVal);
                     h.setCurrentPrice(price);
                     h.setCurrentValue(newCurVal);
                     h.setProfit(profit);
-                    h.setProfitPercentage((profit / newPurchaseVal) * 100);
+                    h.setProfitPercentage(percentage(profit, newPurchaseVal));
                     h.setLastUpdated(new Date());
                 }
             }
@@ -191,14 +257,37 @@ public class DemoTradingController {
             // Recalculate equity / profit-loss
             account.recalculate();
             tradingRepo.save(account);
+            accountPersisted = true;
+
+            if (idempotencyRecord != null) {
+                try {
+                    idempotencyRecord.setStatus("COMPLETED");
+                    tradeIdempotencyRepository.save(idempotencyRecord);
+                } catch (Exception idempotencyFailure) {
+                    // The account write already succeeded. Never delete the idempotency
+                    // record or retry the trade, because that could execute it twice.
+                    // The PROCESSING record will expire via its TTL and the failure is logged.
+                    org.slf4j.LoggerFactory.getLogger(DemoTradingController.class)
+                            .error("Trade persisted but idempotency completion failed userId={} key={}",
+                                    userId, idempotencyKey, idempotencyFailure);
+                }
+            }
 
             notifyTradeByEmail(userId, type, symbol, companyName, quantity, price, totalAmount, account);
 
             return ResponseEntity.ok(account);
 
+        } catch (OptimisticLockingFailureException e) {
+            if (idempotencyRecord != null) {
+                tradeIdempotencyRepository.deleteById(idempotencyRecord.getId());
+            }
+            return ResponseEntity.status(409).body(
+                    Map.of("error", "Trading account was modified by another request. Please retry."));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(
-                    Map.of("error", "Server error", "message", e.getMessage()));
+            if (idempotencyRecord != null && !accountPersisted) {
+                tradeIdempotencyRepository.deleteById(idempotencyRecord.getId());
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Server error"));
         }
     }
 
@@ -222,7 +311,7 @@ public class DemoTradingController {
             return ResponseEntity.ok(sorted);
         } catch (Exception e) {
             return ResponseEntity.status(500).body(
-                    Map.of("error", "Server error", "message", e.getMessage()));
+                    Map.of("error", "Server error"));
         }
     }
 
@@ -248,14 +337,18 @@ public class DemoTradingController {
             ensureAccountCollections(account);
 
             for (HoldingUpdateItem update : req.getHoldings()) {
+                if (update == null || update.getSymbol() == null || update.getSymbol().isBlank()
+                        || !Double.isFinite(update.getCurrentPrice()) || update.getCurrentPrice() <= 0) {
+                    return ResponseEntity.badRequest().body(Map.of("error", "Invalid holding update"));
+                }
                 String uSym = normalizeSymbol(update.getSymbol());
                 account.getHoldings().stream()
                         .filter(h -> uSym.equals(normalizeSymbol(h.getSymbol())))
                         .findFirst()
                         .ifPresent(h -> {
                             h.setCurrentPrice(update.getCurrentPrice());
-                            h.setCurrentValue(h.getQuantity() * update.getCurrentPrice());
-                            h.setProfit(h.getCurrentValue() - h.getPurchaseValue());
+                            h.setCurrentValue(money(BigDecimal.valueOf(h.getQuantity()).multiply(BigDecimal.valueOf(update.getCurrentPrice()))));
+                            h.setProfit(money(BigDecimal.valueOf(h.getCurrentValue()).subtract(BigDecimal.valueOf(h.getPurchaseValue()))));
                             h.setProfitPercentage(
                                     (h.getProfit() / h.getPurchaseValue()) * 100);
                             h.setLastUpdated(new Date());
@@ -268,7 +361,7 @@ public class DemoTradingController {
             return ResponseEntity.ok(account);
         } catch (Exception e) {
             return ResponseEntity.status(500).body(
-                    Map.of("error", "Server error", "message", e.getMessage()));
+                    Map.of("error", "Server error"));
         }
     }
 
@@ -299,7 +392,7 @@ public class DemoTradingController {
 
         } catch (Exception e) {
             return ResponseEntity.status(500).body(
-                    Map.of("error", "Server error", "message", e.getMessage()));
+                    Map.of("error", "Server error"));
         }
     }
 
@@ -375,11 +468,12 @@ public class DemoTradingController {
                         int    newQty   = (int) h.get("quantity") + tx.getQuantity();
                         double avgCost  = (double) h.get("averageCost");
                         double qty      = (double)(int) h.get("quantity");
-                        double newTotal = avgCost * qty - tx.getTotalAmount();
+                        double newTotal = money(BigDecimal.valueOf(avgCost).multiply(BigDecimal.valueOf((int) h.get("quantity")))
+                                .subtract(BigDecimal.valueOf(tx.getTotalAmount())));
                         h.put("quantity",     newQty);
                         h.put("averageCost",  newTotal / newQty);
                         h.put("currentPrice", tx.getPrice());
-                        h.put("currentValue", newQty * tx.getPrice());
+                        h.put("currentValue", money(BigDecimal.valueOf(newQty).multiply(BigDecimal.valueOf(tx.getPrice()))));
                     } else {
                         Map<String, Object> h = new LinkedHashMap<>();
                         h.put("symbol",       txSym);
@@ -387,7 +481,7 @@ public class DemoTradingController {
                         h.put("quantity",     tx.getQuantity());
                         h.put("averageCost",  tx.getPrice());
                         h.put("currentPrice", tx.getPrice());
-                        h.put("currentValue", tx.getQuantity() * tx.getPrice());
+                        h.put("currentValue", money(BigDecimal.valueOf(tx.getQuantity()).multiply(BigDecimal.valueOf(tx.getPrice()))));
                         currentHoldings.add(h);
                     }
 
@@ -412,10 +506,10 @@ public class DemoTradingController {
                     }
                 }
 
-                double holdingsValue = currentHoldings.stream()
-                        .mapToDouble(h -> (double) h.get("currentValue"))
-                        .sum();
-                double equity = currentBalance + holdingsValue;
+                double holdingsValue = money(currentHoldings.stream()
+                        .map(h -> BigDecimal.valueOf((double) h.get("currentValue")))
+                        .reduce(BigDecimal.ZERO, BigDecimal::add));
+                double equity = money(BigDecimal.valueOf(currentBalance).add(BigDecimal.valueOf(holdingsValue)));
 
                 Map<String, Object> snap = new LinkedHashMap<>();
                 snap.put("date",          tx.getDate());
@@ -431,8 +525,9 @@ public class DemoTradingController {
             // Add current snapshot if time has passed since last transaction
             long daysSinceLast = (now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24);
             if (daysSinceLast > 0) {
-                double holdingsValue = account.getHoldings().stream()
-                        .mapToDouble(Holding::getCurrentValue).sum();
+                double holdingsValue = money(account.getHoldings().stream()
+                        .map(h -> BigDecimal.valueOf(h.getCurrentValue()))
+                        .reduce(BigDecimal.ZERO, BigDecimal::add));
                 Map<String, Object> curSnap = new LinkedHashMap<>();
                 curSnap.put("date",          now);
                 curSnap.put("equity",        account.getEquity());
@@ -485,7 +580,7 @@ public class DemoTradingController {
 
         } catch (Exception e) {
             return ResponseEntity.status(500).body(
-                    Map.of("error", "Server error", "message", e.getMessage()));
+                    Map.of("error", "Server error"));
         }
     }
 
@@ -501,7 +596,28 @@ public class DemoTradingController {
         account.setTransactions(new ArrayList<>());
         account.setCreatedAt(new Date());
         account.setLastUpdated(new Date());
-        return tradingRepo.save(account);
+
+        try {
+            return tradingRepo.save(account);
+        } catch (DuplicateKeyException e) {
+            // Another request may have created the account concurrently.
+            return tradingRepo.findByUserId(userId)
+                    .orElseThrow(() -> e);
+        }
+    }
+
+    private static double money(BigDecimal value) {
+        return value.setScale(2, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    private static double percentage(double numerator, double denominator) {
+        if (denominator == 0) {
+            return 0;
+        }
+        return BigDecimal.valueOf(numerator)
+                .divide(BigDecimal.valueOf(denominator), 8, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100))
+                .doubleValue();
     }
 
     private static String normalizeSymbol(String symbol) {
@@ -556,8 +672,8 @@ public class DemoTradingController {
 
     private double[] change(double oldVal, double newVal) {
         if (oldVal == 0) return new double[]{0, 0};
-        double c = newVal - oldVal;
-        double p = (c / oldVal) * 100;
+        double c = money(BigDecimal.valueOf(newVal).subtract(BigDecimal.valueOf(oldVal)));
+        double p = percentage(c, oldVal);
         return new double[]{c, p};
     }
 
