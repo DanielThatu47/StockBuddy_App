@@ -104,10 +104,12 @@ public class DemoTradingController {
                 }
 
                 if (saved.isCompleted()) {
-                    return tradingRepo.findByUserId(userId)
-                            .map(ResponseEntity::ok)
-                            .orElseGet(() -> ResponseEntity.status(404).body(
-                                    Map.of("error", "Trading account not found")));
+                    Optional<DemoTradingAccount> existingAccount = tradingRepo.findByUserId(userId);
+                    if (existingAccount.isPresent()) {
+                        return ResponseEntity.ok(existingAccount.get());
+                    }
+                    return ResponseEntity.status(404).body(
+                            Map.of("error", "Trading account not found"));
                 }
                 return ResponseEntity.status(409).body(Map.of(
                         "error", "This trade request is already being processed. Please retry later."));
