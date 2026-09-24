@@ -116,6 +116,44 @@ public class DemoTradingController {
         if (req.getPrice() <= 0)
             return ResponseEntity.badRequest().body(Map.of("error", "Price must be a positive number"));
 
+        String idempotencyKey = req.getIdempotencyKey() == null
+                ? "" : req.getIdempotencyKey().trim();
+        if (idempotencyKey.length() > 128) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Idempotency key is too long"));
+        }
+
+        TradeIdempotency idempotencyRecord = null;
+        if (!idempotencyKey.isBlank()) {
+            Optional<TradeIdempotency> existing = tradeIdempotencyRepository
+                    .findByUserIdAndIdempotencyKey(userId, idempotencyKey);
+            if (existing.isPresent()) {
+                if (existing.get().isCompleted()) {
+                    return tradingRepo.findByUserId(userId)
+                            .map(ResponseEntity::ok)
+                            .orElseGet(() -> ResponseEntity.status(404).body(
+                                    Map.of("error", "Trading account not found")));
+                }
+                return ResponseEntity.status(409).body(Map.of(
+                        "error", "This trade request is already being processed. Please retry later."));
+            }
+
+            idempotencyRecord = new TradeIdempotency();
+            idempotencyRecord.setUserId(userId);
+            idempotencyRecord.setIdempotencyKey(idempotencyKey);
+            idempotencyRecord.setStatus("PROCESSING");
+            idempotencyRecord.setSymbol(normalizeSymbol(req.getSymbol()));
+            idempotencyRecord.setType(req.getType());
+            idempotencyRecord.setQuantity(req.getQuantity());
+            idempotencyRecord.setPrice(req.getPrice());
+
+            try {
+                idempotencyRecord = tradeIdempotencyRepository.save(idempotencyRecord);
+            } catch (DuplicateKeyException e) {
+                return ResponseEntity.status(409).body(Map.of(
+                        "error", "This trade request is already being processed. Please retry later."));
+            }
+        }
+
         try {
             DemoTradingAccount account = tradingRepo.findByUserId(userId)
                     .orElseGet(() -> createDefaultAccount(userId));
