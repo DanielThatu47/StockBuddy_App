@@ -93,9 +93,12 @@ public class PredictionController {
             return ResponseEntity.badRequest().body(Map.of("message", "Symbol is required"));
         }
 
-        String symbol       = req.getSymbol().toUpperCase();
+        String symbol       = req.getSymbol().trim().toUpperCase(Locale.ROOT);
         int predictionDays  = (req.getDaysAhead() != null && req.getDaysAhead() > 0)
                               ? req.getDaysAhead() : 3;
+        if (predictionDays > 30) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Prediction horizon cannot exceed 30 days"));
+        }
 
         try {
             // Check for existing pending/running prediction for same symbol
@@ -271,16 +274,12 @@ public class PredictionController {
                                              Authentication auth) {
         String userId = (String) auth.getPrincipal();
         try {
-            Optional<Prediction> opt = predictionRepository.findByTaskId(taskId);
+            Optional<Prediction> opt = predictionRepository.findByTaskIdAndUserId(taskId, userId);
             if (opt.isEmpty()) {
                 return ResponseEntity.status(404).body(Map.of("message", "Prediction not found"));
             }
 
             Prediction prediction = opt.get();
-
-            if (!prediction.getUserId().equals(userId)) {
-                return ResponseEntity.status(403).body(Map.of("message", "Not authorized"));
-            }
 
             ResponseEntity<Map> apiResponse = predictionService.stopPrediction(taskId);
 
