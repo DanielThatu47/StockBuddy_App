@@ -385,7 +385,6 @@ public class PredictionController {
         String detail = formatModelErrorPayload(err, code);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("message", hint + " (HTTP " + code + ")");
-        body.put("detail", detail);
         return ResponseEntity.status(apiResponse.getStatusCode()).body(body);
     }
 
@@ -417,36 +416,36 @@ public class PredictionController {
             log.error("{} failed userId={} {}: HTTP {} bodySnippet={}",
                     operation, userId, symbolOrTask, hs.getStatusCode(), abbreviate(hs.getResponseBodyAsString()), e);
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(errorBody(
-                    operation + " failed: model HTTP " + hs.getStatusCode().value(),
-                    extractHttpExceptionDetail(hs)));
+                    operation + " failed: model HTTP " + hs.getStatusCode().value()));
         }
         if (e instanceof ResourceAccessException) {
             log.error("{} failed userId={} {}: cannot reach model API", operation, userId, symbolOrTask, e);
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(errorBody(
-                    operation + " failed: cannot reach model API (timeout, DNS, or connection refused)",
-                    rootMessage(e)));
+                    operation + " failed: cannot reach model API (timeout, DNS, or connection refused)"));
         }
         if (e instanceof RestClientException) {
             log.error("{} failed userId={} {}: RestClient error", operation, userId, symbolOrTask, e);
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(errorBody(
-                    operation + " failed: model request error",
-                    rootMessage(e)));
+                    operation + " failed: model request error"));
         }
         log.error("{} failed userId={} {}", operation, userId, symbolOrTask, e);
         return serverError(operation + " failed: unexpected server error", e);
     }
 
     private static ResponseEntity<Map<String, Object>> serverError(String message, Exception e) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorBody(message, rootMessage(e)));
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(errorBody(message));
     }
 
-    private static Map<String, Object> errorBody(String message, String detail) {
+    private static Map<String, Object> errorBody(String message) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("message", message);
-        if (detail != null && !detail.isBlank()) {
-            m.put("detail", detail);
-        }
         return m;
+    }
+
+    private static Map<String, Object> errorBody(String message, String ignoredDetail) {
+        // Preserve the existing helper signature for internal callers without exposing details.
+        return errorBody(message);
     }
 
     private static String extractHttpExceptionDetail(HttpStatusCodeException e) {
