@@ -26,6 +26,7 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import java.util.*;
 import java.util.Locale;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 @RestController
 @RequestMapping("/api/demotrading")
@@ -167,8 +168,8 @@ public class DemoTradingController {
                     int    newQty       = h.getQuantity() + quantity;
                     double newTotalVal  = BigDecimal.valueOf(h.getPurchaseValue()).add(totalAmountValue).doubleValue();
                     double newAvgPrice  = BigDecimal.valueOf(newTotalVal).divide(BigDecimal.valueOf(newQty), 12, java.math.RoundingMode.HALF_UP).doubleValue();
-                    double newCurVal    = newQty * price;
-                    double profit       = newCurVal - newTotalVal;
+                    double newCurVal    = money(BigDecimal.valueOf(newQty).multiply(priceValue));
+                    double profit       = money(BigDecimal.valueOf(newCurVal).subtract(BigDecimal.valueOf(newTotalVal)));
 
                     h.setQuantity(newQty);
                     h.setAveragePrice(newAvgPrice);
@@ -176,7 +177,7 @@ public class DemoTradingController {
                     h.setCurrentPrice(price);
                     h.setCurrentValue(newCurVal);
                     h.setProfit(profit);
-                    h.setProfitPercentage((profit / newTotalVal) * 100);
+                    h.setProfitPercentage(percentage(profit, newTotalVal));
                     h.setLastUpdated(new Date());
                 } else {
                     Holding h = new Holding();
@@ -225,15 +226,15 @@ public class DemoTradingController {
                 } else {
                     double soldValue     = BigDecimal.valueOf(quantity).multiply(BigDecimal.valueOf(h.getAveragePrice())).doubleValue();
                     double newPurchaseVal = BigDecimal.valueOf(h.getPurchaseValue()).subtract(BigDecimal.valueOf(soldValue)).doubleValue();
-                    double newCurVal      = newQty * price;
-                    double profit         = newCurVal - newPurchaseVal;
+                    double newCurVal      = money(BigDecimal.valueOf(newQty).multiply(priceValue));
+                    double profit         = money(BigDecimal.valueOf(newCurVal).subtract(BigDecimal.valueOf(newPurchaseVal)));
 
                     h.setQuantity(newQty);
                     h.setPurchaseValue(newPurchaseVal);
                     h.setCurrentPrice(price);
                     h.setCurrentValue(newCurVal);
                     h.setProfit(profit);
-                    h.setProfitPercentage((profit / newPurchaseVal) * 100);
+                    h.setProfitPercentage(percentage(profit, newPurchaseVal));
                     h.setLastUpdated(new Date());
                 }
             }
@@ -329,8 +330,8 @@ public class DemoTradingController {
                         .findFirst()
                         .ifPresent(h -> {
                             h.setCurrentPrice(update.getCurrentPrice());
-                            h.setCurrentValue(h.getQuantity() * update.getCurrentPrice());
-                            h.setProfit(h.getCurrentValue() - h.getPurchaseValue());
+                            h.setCurrentValue(money(BigDecimal.valueOf(h.getQuantity()).multiply(BigDecimal.valueOf(update.getCurrentPrice()))));
+                            h.setProfit(money(BigDecimal.valueOf(h.getCurrentValue()).subtract(BigDecimal.valueOf(h.getPurchaseValue()))));
                             h.setProfitPercentage(
                                     (h.getProfit() / h.getPurchaseValue()) * 100);
                             h.setLastUpdated(new Date());
@@ -584,6 +585,20 @@ public class DemoTradingController {
             return tradingRepo.findByUserId(userId)
                     .orElseThrow(() -> e);
         }
+    }
+
+    private static double money(BigDecimal value) {
+        return value.setScale(2, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    private static double percentage(double numerator, double denominator) {
+        if (denominator == 0) {
+            return 0;
+        }
+        return BigDecimal.valueOf(numerator)
+                .divide(BigDecimal.valueOf(denominator), 8, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100))
+                .doubleValue();
     }
 
     private static String normalizeSymbol(String symbol) {
