@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.util.*;
@@ -504,7 +505,14 @@ public class DemoTradingController {
         account.setTransactions(new ArrayList<>());
         account.setCreatedAt(new Date());
         account.setLastUpdated(new Date());
-        return tradingRepo.save(account);
+
+        try {
+            return tradingRepo.save(account);
+        } catch (DuplicateKeyException e) {
+            // Another request may have created the account concurrently.
+            return tradingRepo.findByUserId(userId)
+                    .orElseThrow(() -> e);
+        }
     }
 
     private static String normalizeSymbol(String symbol) {
