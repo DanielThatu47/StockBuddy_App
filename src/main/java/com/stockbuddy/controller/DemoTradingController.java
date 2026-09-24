@@ -87,6 +87,7 @@ public class DemoTradingController {
         }
 
         TradeIdempotency idempotencyRecord = null;
+        boolean accountPersisted = false;
         if (!idempotencyKey.isBlank()) {
             Optional<TradeIdempotency> existing = tradeIdempotencyRepository
                     .findByUserIdAndIdempotencyKey(userId, idempotencyKey);
@@ -254,6 +255,7 @@ public class DemoTradingController {
             // Recalculate equity / profit-loss
             account.recalculate();
             tradingRepo.save(account);
+            accountPersisted = true;
 
             if (idempotencyRecord != null) {
                 idempotencyRecord.setStatus("COMPLETED");
@@ -271,7 +273,7 @@ public class DemoTradingController {
             return ResponseEntity.status(409).body(
                     Map.of("error", "Trading account was modified by another request. Please retry."));
         } catch (Exception e) {
-            if (idempotencyRecord != null) {
+            if (idempotencyRecord != null && !accountPersisted) {
                 tradeIdempotencyRepository.deleteById(idempotencyRecord.getId());
             }
             return ResponseEntity.status(500).body(Map.of("error", "Server error"));
@@ -298,7 +300,7 @@ public class DemoTradingController {
             return ResponseEntity.ok(sorted);
         } catch (Exception e) {
             return ResponseEntity.status(500).body(
-                    Map.of("error", "Server error", "message", e.getMessage()));
+                    Map.of("error", "Server error"));
         }
     }
 
@@ -324,6 +326,10 @@ public class DemoTradingController {
             ensureAccountCollections(account);
 
             for (HoldingUpdateItem update : req.getHoldings()) {
+                if (update == null || update.getSymbol() == null || update.getSymbol().isBlank()
+                        || !Double.isFinite(update.getCurrentPrice()) || update.getCurrentPrice() <= 0) {
+                    return ResponseEntity.badRequest().body(Map.of("error", "Invalid holding update"));
+                }
                 String uSym = normalizeSymbol(update.getSymbol());
                 account.getHoldings().stream()
                         .filter(h -> uSym.equals(normalizeSymbol(h.getSymbol())))
@@ -344,7 +350,7 @@ public class DemoTradingController {
             return ResponseEntity.ok(account);
         } catch (Exception e) {
             return ResponseEntity.status(500).body(
-                    Map.of("error", "Server error", "message", e.getMessage()));
+                    Map.of("error", "Server error"));
         }
     }
 
@@ -375,7 +381,7 @@ public class DemoTradingController {
 
         } catch (Exception e) {
             return ResponseEntity.status(500).body(
-                    Map.of("error", "Server error", "message", e.getMessage()));
+                    Map.of("error", "Server error"));
         }
     }
 
@@ -563,7 +569,7 @@ public class DemoTradingController {
 
         } catch (Exception e) {
             return ResponseEntity.status(500).body(
-                    Map.of("error", "Server error", "message", e.getMessage()));
+                    Map.of("error", "Server error"));
         }
     }
 
