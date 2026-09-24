@@ -67,9 +67,7 @@ public class CaptchaController {
         } else {
             return ResponseEntity.ok(Map.of(
                     "success",       false,
-                    "message",       "Invalid CAPTCHA. Please ensure you enter the exact characters shown (case-sensitive).",
-                    "expectedValue", expected,   // for debugging; remove in production
-                    "userValue",     userInput    // for debugging; remove in production
+                    "message",       "Invalid CAPTCHA. Please ensure you enter the exact characters shown (case-sensitive)."
             ));
         }
     }
